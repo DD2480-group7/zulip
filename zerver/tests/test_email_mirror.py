@@ -28,7 +28,9 @@ from zerver.models import (
 from zerver.lib.actions import (
     create_stream_if_needed,
     encode_email_address,
-    do_create_user
+    do_create_user,
+    get_email_gateway_message_string_from_address,
+    ZulipEmailUnrecognizedAddressError
 )
 from zerver.lib.email_mirror import (
     process_message, process_stream_message, ZulipEmailForwardError,
@@ -582,3 +584,8 @@ class TestEmailMirrorTornadoView(ZulipTestCase):
         self.assert_json_error(
             result,
             "5.1.1 Bad destination mailbox address: Bad or expired missed message address.")
+
+class TestEmailMirrorDecodeAndEncode(ZulipTestCase):
+    @mock.patch('zerver.lib.email_mirror.re.match', return_value=None)
+    def test_exception_get_email_gateway_message_string_from_address(self, mock_match: mock.MagicMock) -> None:
+        self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, "address")

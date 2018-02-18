@@ -3684,7 +3684,7 @@ def get_email_gateway_message_string_from_address(address: Text) -> Optional[Tex
     match = match_email_re.match(address)
 
     if not match:
-        return None
+        raise ZulipEmailUnrecognizedAddressError("No matching address found")
 
     msg_string = match.group(1)
 
@@ -3692,18 +3692,19 @@ def get_email_gateway_message_string_from_address(address: Text) -> Optional[Tex
 
 def decode_email_address(email: Text) -> Optional[Tuple[Text, Text]]:
     # Perform the reverse of encode_email_address. Returns a tuple of (streamname, email_token)
-    msg_string = get_email_gateway_message_string_from_address(email)
+    try:
+        msg_string = get_email_gateway_message_string_from_address(email)
 
-    if msg_string is None:
+        if '.' in msg_string:
+            # Workaround for Google Groups and other programs that don't accept emails
+            # that have + signs in them (see Trac #2102)
+            encoded_stream_name, token = msg_string.split('.')
+        else:
+            encoded_stream_name, token = msg_string.split('+')
+        stream_name = re.sub("%\d{4}", lambda x: unichr(int(x.group(0)[1:])), encoded_stream_name)
+        return stream_name, token
+    except ZulipEmailUnrecognizedAddressError:
         return None
-    elif '.' in msg_string:
-        # Workaround for Google Groups and other programs that don't accept emails
-        # that have + signs in them (see Trac #2102)
-        encoded_stream_name, token = msg_string.split('.')
-    else:
-        encoded_stream_name, token = msg_string.split('+')
-    stream_name = re.sub("%\d{4}", lambda x: unichr(int(x.group(0)[1:])), encoded_stream_name)
-    return stream_name, token
 
 # In general, it's better to avoid using .values() because it makes
 # the code pretty ugly, but in this case, it has significant
@@ -4452,3 +4453,6 @@ def check_delete_user_group(user_group_id: int, realm: Realm) -> None:
     user_group = access_user_group_by_id(user_group_id, realm)
     user_group.delete()
     do_send_delete_user_group_event(user_group_id, realm.id)
+
+class ZulipEmailUnrecognizedAddressError(Exception):
+    pass

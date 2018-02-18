@@ -9,7 +9,7 @@ import email.message as message
 from django.conf import settings
 
 from zerver.lib.actions import decode_email_address, get_email_gateway_message_string_from_address, \
-    internal_send_message, internal_send_private_message, \
+    internal_send_message, internal_send_private_message, ZulipEmailUnrecognizedAddressError, \
     internal_send_stream_message, internal_send_huddle_message
 from zerver.lib.notifications import convert_html_to_markdown
 from zerver.lib.queue import queue_json_publish
@@ -70,8 +70,11 @@ def missed_message_redis_key(token: Text) -> Text:
 
 
 def is_missed_message_address(address: Text) -> bool:
-    msg_string = get_email_gateway_message_string_from_address(address)
-    return is_mm_32_format(msg_string)
+    try:
+        msg_string = get_email_gateway_message_string_from_address(address)
+        return is_mm_32_format(msg_string)
+    except ZulipEmailUnrecognizedAddressError:
+        return None
 
 def is_mm_32_format(msg_string: Optional[Text]) -> bool:
     '''
@@ -81,16 +84,16 @@ def is_mm_32_format(msg_string: Optional[Text]) -> bool:
     return msg_string is not None and msg_string.startswith('mm') and len(msg_string) == 34
 
 def get_missed_message_token_from_address(address: Text) -> Text:
-    msg_string = get_email_gateway_message_string_from_address(address)
+    try:
+        msg_string = get_email_gateway_message_string_from_address(address)
 
-    if msg_string is None:
+        if not is_mm_32_format(msg_string):
+            raise ZulipEmailForwardError('Could not parse missed message address')
+
+        # strip off the 'mm' before returning the redis key
+        return msg_string[2:]
+    except ZulipEmailUnrecognizedAddressError:
         raise ZulipEmailForwardError('Address not recognized by gateway.')
-
-    if not is_mm_32_format(msg_string):
-        raise ZulipEmailForwardError('Could not parse missed message address')
-
-    # strip off the 'mm' before returning the redis key
-    return msg_string[2:]
 
 def create_missed_message_address(user_profile: UserProfile, message: Message) -> str:
     if settings.EMAIL_GATEWAY_PATTERN == '':
