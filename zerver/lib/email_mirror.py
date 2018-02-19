@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Text, Union
+from typing import Any, Dict, List, Optional, Text, Union, Tuple
 
 import logging
 import re
@@ -7,10 +7,9 @@ from email.header import decode_header, Header
 import email.message as message
 
 from django.conf import settings
+from six import unichr
 
-from zerver.lib.actions import decode_email_address, get_email_gateway_message_string_from_address, \
-    internal_send_message, internal_send_private_message, ZulipEmailUnrecognizedAddressError, \
-    internal_send_stream_message, internal_send_huddle_message
+import zerver.lib.actions
 from zerver.lib.notifications import convert_html_to_markdown
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.redis_utils import get_redis_client
@@ -167,20 +166,20 @@ def send_to_missed_message_address(address: Text, message: message.Message) -> N
     if recipient.type == Recipient.STREAM:
         assert isinstance(display_recipient, str)
         recipient_str = display_recipient
-        internal_send_stream_message(user_profile.realm, user_profile, recipient_str,
-                                     subject_b.decode('utf-8'), body)
+        zerver.lib.actions.internal_send_stream_message(user_profile.realm, user_profile, recipient_str,
+                                              subject_b.decode('utf-8'), body)
     elif recipient.type == Recipient.PERSONAL:
         assert not isinstance(display_recipient, str)
         recipient_str = display_recipient[0]['email']
         recipient_user = get_user(recipient_str, user_profile.realm)
-        internal_send_private_message(user_profile.realm, user_profile,
-                                      recipient_user, body)
+        zerver.lib.actions.internal_send_private_message(user_profile.realm, user_profile,
+                                               recipient_user, body)
     elif recipient.type == Recipient.HUDDLE:
         assert not isinstance(display_recipient, str)
         emails = [user_dict['email'] for user_dict in display_recipient]
         recipient_str = ', '.join(emails)
-        internal_send_huddle_message(user_profile.realm, user_profile,
-                                     emails, body)
+        zerver.lib.actions.internal_send_huddle_message(user_profile.realm, user_profile,
+                                              emails, body)
     else:
         raise AssertionError("Invalid recipient type!")
 
@@ -193,7 +192,7 @@ class ZulipEmailForwardError(Exception):
     pass
 
 def send_zulip(sender: Text, stream: Stream, topic: Text, content: Text) -> None:
-    internal_send_message(
+    zerver.lib.actions.internal_send_message(
         stream.realm,
         sender,
         "stream",
@@ -373,3 +372,57 @@ def mirror_email_message(data: Dict[Text, Text]) -> Dict[str, str]:
         }
     )
     return {"status": "success"}
+
+def encode_email_address(stream: Stream) -> Text:
+    return encode_email_address_helper(stream.name, stream.email_token)
+
+def encode_email_address_helper(name: Text, email_token: Text) -> Text:
+    # Some deployments may not use the email gateway
+    if settings.EMAIL_GATEWAY_PATTERN == '':
+        return ''
+
+    # Given the fact that we have almost no restrictions on stream names and
+    # that what characters are allowed in e-mail addresses is complicated and
+    # dependent on context in the address, we opt for a very simple scheme:
+    #
+    # Only encode the stream name (leave the + and token alone). Encode
+    # everything that isn't alphanumeric plus _ as the percent-prefixed integer
+    # ordinal of that character, padded with zeroes to the maximum number of
+    # bytes of a UTF-8 encoded Unicode character.
+    encoded_name = re.sub("\W", lambda x: "%" + str(ord(x.group(0))).zfill(4), name)
+    encoded_token = "%s+%s" % (encoded_name, email_token)
+    return settings.EMAIL_GATEWAY_PATTERN % (encoded_token,)
+
+def get_email_gateway_message_string_from_address(address: Text) -> Optional[Text]:
+    pattern_parts = [re.escape(part) for part in settings.EMAIL_GATEWAY_PATTERN.split('%s')]
+    if settings.EMAIL_GATEWAY_EXTRA_PATTERN_HACK:
+        # Accept mails delivered to any Zulip server
+        pattern_parts[-1] = settings.EMAIL_GATEWAY_EXTRA_PATTERN_HACK
+    match_email_re = re.compile("(.*?)".join(pattern_parts))
+    match = match_email_re.match(address)
+
+    if not match:
+        raise ZulipEmailUnrecognizedAddressError("No matching address found")
+
+    msg_string = match.group(1)
+
+    return msg_string
+
+def decode_email_address(email: Text) -> Optional[Tuple[Text, Text]]:
+    # Perform the reverse of encode_email_address. Returns a tuple of (streamname, email_token)
+    try:
+        msg_string = get_email_gateway_message_string_from_address(email)
+
+        if '.' in msg_string:
+            # Workaround for Google Groups and other programs that don't accept emails
+            # that have + signs in them (see Trac #2102)
+            encoded_stream_name, token = msg_string.split('.')
+        else:
+            encoded_stream_name, token = msg_string.split('+')
+        stream_name = re.sub("%\d{4}", lambda x: unichr(int(x.group(0)[1:])), encoded_stream_name)
+        return stream_name, token
+    except ZulipEmailUnrecognizedAddressError:
+        return None
+
+class ZulipEmailUnrecognizedAddressError(Exception):
+    pass
