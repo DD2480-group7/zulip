@@ -591,3 +591,13 @@ class TestEmailMirrorDecodeAndEncode(ZulipTestCase):
     @mock.patch('zerver.lib.email_mirror.re.match', return_value=None)
     def test_exception_get_email_gateway_message_string_from_address(self, mock_match: mock.MagicMock) -> None:
         self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, "address")
+        
+    @mock.patch('zerver.lib.email_mirror.re.compile', return_value=re.compile(r"(\w+) (\w+)"))
+    def test_no_exception_get_email_gateway_message_string_from_address_with_mock_pattern(self, mock_match: mock.MagicMock) -> None:
+        res = get_email_gateway_message_string_from_address("Jane Austen");
+        print(res)
+        self.assertEqual("Jane", res)
+
+    @mock.patch('zerver.lib.email_mirror.re.compile', return_value=re.compile(r"(\bt\w+) (\w+)"))
+    def test_exception_get_email_gateway_message_string_from_address_with_mock_pattern(self, mock_match: mock.MagicMock) -> None:
+        self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, "Jane Austen")
