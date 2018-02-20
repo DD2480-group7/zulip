@@ -3684,7 +3684,7 @@ def get_email_gateway_message_string_from_address(address: Text) -> Optional[Tex
     match = match_email_re.match(address)
 
     if not match:
-        return None
+        raise ZulipEmailUnrecognizedAddressError
 
     msg_string = match.group(1)
 
@@ -4452,3 +4452,6 @@ def check_delete_user_group(user_group_id: int, realm: Realm) -> None:
     user_group = access_user_group_by_id(user_group_id, realm)
     user_group.delete()
     do_send_delete_user_group_event(user_group_id, realm.id)
+
+class ZulipEmailUnrecognizedAddressError(Exception):
+    pass
