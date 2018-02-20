@@ -27,16 +27,16 @@ from zerver.models import (
 
 from zerver.lib.actions import (
     create_stream_if_needed,
-    encode_email_address,
-    decode_email_address,
     do_create_user,
-    get_email_gateway_message_string_from_address,
-    ZulipEmailUnrecognizedAddressError
 )
 from zerver.lib.email_mirror import (
     process_message, process_stream_message, ZulipEmailForwardError,
     create_missed_message_address,
     get_missed_message_token_from_address,
+    encode_email_address,
+    decode_email_address,
+    get_email_gateway_message_string_from_address,
+    ZulipEmailUnrecognizedAddressError
 )
 
 from zerver.lib.digest import gather_new_streams, handle_digest_email, enqueue_emails
