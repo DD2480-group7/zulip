@@ -410,19 +410,17 @@ def get_email_gateway_message_string_from_address(address: Text) -> Optional[Tex
 
 def decode_email_address(email: Text) -> Optional[Tuple[Text, Text]]:
     # Perform the reverse of encode_email_address. Returns a tuple of (streamname, email_token)
-    try:
-        msg_string = get_email_gateway_message_string_from_address(email)
 
-        if '.' in msg_string:
-            # Workaround for Google Groups and other programs that don't accept emails
-            # that have + signs in them (see Trac #2102)
-            encoded_stream_name, token = msg_string.split('.')
-        else:
-            encoded_stream_name, token = msg_string.split('+')
-        stream_name = re.sub("%\d{4}", lambda x: unichr(int(x.group(0)[1:])), encoded_stream_name)
-        return stream_name, token
-    except ZulipEmailUnrecognizedAddressError:
-        return None
+    msg_string = get_email_gateway_message_string_from_address(email)
+
+    if '.' in msg_string:
+        # Workaround for Google Groups and other programs that don't accept emails
+        # that have + signs in them (see Trac #2102)
+        encoded_stream_name, token = msg_string.split('.')
+    else:
+        encoded_stream_name, token = msg_string.split('+')
+    stream_name = re.sub("%\d{4}", lambda x: unichr(int(x.group(0)[1:])), encoded_stream_name)
+    return stream_name, token
 
 class ZulipEmailUnrecognizedAddressError(Exception):
     pass

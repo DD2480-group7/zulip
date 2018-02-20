@@ -4401,4 +4401,3 @@ def check_delete_user_group(user_group_id: int, realm: Realm) -> None:
     user_group = access_user_group_by_id(user_group_id, realm)
     user_group.delete()
     do_send_delete_user_group_event(user_group_id, realm.id)
-

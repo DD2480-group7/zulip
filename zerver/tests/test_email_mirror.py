@@ -34,6 +34,7 @@ from zerver.lib.email_mirror import (
     create_missed_message_address,
     get_missed_message_token_from_address,
     encode_email_address,
+    decode_email_address,
     get_email_gateway_message_string_from_address,
     ZulipEmailUnrecognizedAddressError
 )
@@ -586,18 +587,68 @@ class TestEmailMirrorTornadoView(ZulipTestCase):
             "5.1.1 Bad destination mailbox address: Bad or expired missed message address.")
 
 
-class TestEmailMirrorDecodeAndEncode(ZulipTestCase):
+class TestEmailGatewayExtraction(ZulipTestCase):
 
-    @mock.patch('zerver.lib.email_mirror.re.match', return_value=None)
-    def test_exception_get_email_gateway_message_string_from_address(self, mock_match: mock.MagicMock) -> None:
-        self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, "address")
-        
-    @mock.patch('zerver.lib.email_mirror.re.compile', return_value=re.compile(r"(\w+) (\w+)"))
-    def test_no_exception_get_email_gateway_message_string_from_address_with_mock_pattern(self, mock_match: mock.MagicMock) -> None:
-        res = get_email_gateway_message_string_from_address("Jane Austen");
-        print(res)
-        self.assertEqual("Jane", res)
+    def test_no_exception_get_email_gateway_message_string_from_address(self) -> None:
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            email_address = self.example_email('hamlet')
+            res = get_email_gateway_message_string_from_address(email_address)
+            self.assertEqual("hamlet", res)
 
-    @mock.patch('zerver.lib.email_mirror.re.compile', return_value=re.compile(r"(\bt\w+) (\w+)"))
-    def test_exception_get_email_gateway_message_string_from_address_with_mock_pattern(self, mock_match: mock.MagicMock) -> None:
-        self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, "Jane Austen")
+    def test_exception_get_get_email_gateway_message_string_from_address(self) -> None:
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@mit.edu'):
+            email_address = self.example_email('hamlet')
+            self.assertRaises(ZulipEmailUnrecognizedAddressError, get_email_gateway_message_string_from_address, email_address)
+
+    def test_allow_all_get_get_email_gateway_message_string_from_address(self) -> None:
+        with self.settings(EMAIL_GATEWAY_EXTRA_PATTERN_HACK='@.*'):
+            email_address = self.example_email('hamlet')  # @zulip.com
+            res = get_email_gateway_message_string_from_address(email_address)
+            self.assertEqual("hamlet", res)
+            email_address = self.mit_email('espuser')  # @mit.edu
+            res = get_email_gateway_message_string_from_address(email_address)
+            self.assertEqual("espuser", res)
+
+
+class TestEncodeDecode(ZulipTestCase):
+
+    def test_encode(self) -> None:
+        stream = get_stream("Denmark", get_realm("zulip"))
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            encoded = encode_email_address(stream)
+            self.assertEqual("Denmark+"+stream.email_token+"@zulip.com", encoded)
+
+    def test_encode_non_alphanumeric(self) -> None:
+        self.make_stream("Den@mark", get_realm("zulip"))
+        stream = get_stream("Den@mark", get_realm("zulip"))
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            encoded = encode_email_address(stream)
+            self.assertEqual("Den%0064mark+"+stream.email_token+"@zulip.com", encoded)
+
+    def test_decode_is_encode_reverse(self) -> None:
+        stream = get_stream("Denmark", get_realm("zulip"))
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            encoded = encode_email_address(stream)
+            stream_name, token = decode_email_address(encoded)
+
+            self.assertEqual("Denmark", stream_name)
+            self.assertEqual(stream.email_token, token)
+
+    def test_decode_is_encode_reverse_google_group_workaround(self) -> None:
+        stream = get_stream("Denmark", get_realm("zulip"))
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            encoded = encode_email_address(stream)
+            encoded = encoded.replace("+", ".")
+            stream_name, token = decode_email_address(encoded)
+
+            self.assertEqual("Denmark", stream_name)
+            self.assertEqual(stream.email_token, token)
+
+    def test_decode_is_encode_reverse_non_alphanumeric(self) -> None:
+        self.make_stream("Den@mark", get_realm("zulip"))
+        stream = get_stream("Den@mark", get_realm("zulip"))
+        with self.settings(EMAIL_GATEWAY_PATTERN='%s@zulip.com'):
+            encoded = encode_email_address(stream)
+            stream_name, token = decode_email_address(encoded)
+            self.assertEqual("Den@mark", stream_name)
+            self.assertEqual(stream.email_token, token)
